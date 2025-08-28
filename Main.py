@@ -1,8 +1,7 @@
-
 # Overengineered Calculator
 
 import tkinter as tk
-import time, random, sys, platform
+import time, random, sys, platform, traceback, pathlib
 from typing import Dict, Tuple, Optional
 
 # theme
@@ -24,93 +23,116 @@ PADDING = 16
 # symbols
 SYMBOLS = {"×": "*", "÷": "/"}
 
-# per-button colors
-FUNKY: Dict[str, Tuple[str, str, str, str, str]] = {
-    "AC":  ("#ff4775", "#ff6990", "#ff2d5f", "#16040a", "#ff9bb2"),
-    "←":   ("#a96bff", "#b88bff", "#9a4dff", "#0d0616", "#d7baff"),
-    "(":   ("#ff80df", "#ffa2ea", "#ff66d6", "#1a0b16", "#ffc6f1"),
-    ")":   ("#7dff7a", "#9aff97", "#63ff60", "#061306", "#c6ffc5"),
-    "7":   ("#ffe34d", "#ffe97a", "#ffd81f", "#1b1600", "#fff2a6"),
-    "8":   ("#5df0ff", "#85f5ff", "#2aeaff", "#001418", "#bffaff"),
-    "9":   ("#ffb84d", "#ffc879", "#ffa829", "#1b1100", "#ffe0b3"),
-    "÷":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
-    "4":   ("#90ff4d", "#aaff7a", "#79ff1f", "#0e1806", "#d6ff3b"),
-    "5":   ("#ff6df8", "#ff90fb", "#ff47f5", "#170a17", "#ffc6fd"),
-    "6":   ("#4dffda", "#7affe5", "#1fffd3", "#001713", "#b3fff1"),
-    "×":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
-    "1":   ("#ffd24d", "#ffde7a", "#ffc829", "#191200", "#ffe9b3"),
-    "2":   ("#6eff4d", "#8aff7a", "#49ff1f", "#0c1607", "#caffb3"),
-    "3":   ("#4dbbff", "#79ccff", "#29aaff", "#041218", "#b3e2ff"),
-    "-":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
-    "0":   ("#ff9e4d", "#ffb979", "#ff7f29", "#180e03", "#ffd1b3"),
-    ".":   ("#ff7ab3", "#ff9ac7", "#ff5aa1", "#180a11", "#ffc3df"),
-    "=":   ("#00f0a8", "#2df5bd", "#00d895", "#00130e", "#94fbe0"),
-    "+":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
-}
+def safe_randint(lo: int, hi: int) -> int:
+    lo, hi = int(lo), int(hi)
+    if hi < lo:
+        lo, hi = hi, lo
+    return lo if hi == lo else random.randint(lo, hi)
 
-# color utils
-def hex_to_rgb(h: str) -> Tuple[int, int, int]:
-    h = h.lstrip("#")
-    return int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
+def safe_randrange(n: int) -> int:
+    n = int(n)
+    return 0 if n <= 1 else random.randrange(n)
 
-def rgb_to_hex(r: int, g: int, b: int) -> str:
-    r = max(0,min(255,r)); g=max(0,min(255,g)); b=max(0,min(255,b))
+def safe_choice(seq):
+    return random.choice(seq) if seq else None
+
+def clamp_channel(c: int) -> int:
+    return max(0, min(255, c))
+
+def parse_hex(c: str) -> Tuple[int,int,int]:
+    c = c.lstrip("#")
+    return int(c[0:2],16), int(c[2:4],16), int(c[4:6],16)
+
+def to_hex(r: int, g: int, b: int) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
-def mix(a: str, b: str, t: float) -> str:
-    r1,g1,b1 = hex_to_rgb(a); r2,g2,b2 = hex_to_rgb(b)
+def mix(c1: str, c2: str, t: float) -> str:
+    r1,g1,b1 = parse_hex(c1); r2,g2,b2 = parse_hex(c2)
     r = int(r1 + (r2-r1)*t); g = int(g1 + (g2-g1)*t); b = int(b1 + (b2-b1)*t)
-    return rgb_to_hex(r,g,b)
+    return to_hex(r,g,b)
 
-def jitter_color(base: str, amt: int = 24) -> str:
-    r,g,b = hex_to_rgb(base)
+def jitter_color(c: str, amt: int=24) -> str:
+    r,g,b = parse_hex(c)
     r += random.randint(-amt,amt); g += random.randint(-amt,amt); b += random.randint(-amt,amt)
-    return rgb_to_hex(r,g,b)
+    return to_hex(clamp_channel(r), clamp_channel(g), clamp_channel(b))
 
-def luminance(col: str) -> float:
-    r,g,b = hex_to_rgb(col)
-    return 0.2126*(r/255) + 0.7152*(g/255) + 0.0722*(b/255)
-
-def ensure_contrast(bg: str, fg: str, min_diff: float = 0.35) -> str:
-    if abs(luminance(bg)-luminance(fg)) < min_diff:
-        return "#ffffff" if luminance(bg) < 0.5 else "#000000"
+def ensure_contrast(bg: str, fg: str) -> str:
+    br,bg_,bb = parse_hex(bg); fr,fg_,fb = parse_hex(fg)
+    def lum(r,g,b):
+        return 0.2126*(r/255)**2.2 + 0.7152*(g/255)**2.2 + 0.0722*(b/255)**2.2
+    L1 = lum(br,bg_,bb); L2 = lum(fr,fg_,fb)
+    if abs(L1-L2) < 0.25:
+        if L1 > 0.5: return "#0a0b10"
+        else: return "#f8fbff"
     return fg
 
-def neon_styles(label: str) -> Tuple[str, str, str, str, str]:
-    return FUNKY.get(label, ("#2a3152", "#35406b", "#1e2642", "#e6ecff", "#6f7db0"))
+def neon_styles(key: str) -> Tuple[str,str,str,str,str]:
+    palette = {
+        "AC":  ("#ff4d6d", "#ff6b88", "#ff2347", "#140006", "#ffb1bd"),
+        "⌫":   ("#ff9e4d", "#ffb979", "#ff7f29", "#180e03", "#ffd1b3"),
+        "(":   ("#6df2ff", "#90f6ff", "#47ecff", "#001519", "#c6fbff"),
+        ")":   ("#6df2ff", "#90f6ff", "#47ecff", "#001519", "#c6fbff"),
+        "7":   ("#6d9fff", "#90b6ff", "#4782ff", "#040a18", "#c6dbff"),
+        "8":   ("#5df0ff", "#85f5ff", "#2aeaff", "#001418", "#bffaff"),
+        "9":   ("#ffb84d", "#ffc879", "#ffa829", "#1b1100", "#ffe0b3"),
+        "÷":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
+        "4":   ("#90ff4d", "#aaff7a", "#79ff1f", "#0e1806", "#d6ff3b"),
+        "5":   ("#ff6df8", "#ff90fb", "#ff47f5", "#170a17", "#ffc6fd"),
+        "6":   ("#4dffda", "#7affe5", "#1fffd3", "#001713", "#b3fff1"),
+        "×":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
+        "1":   ("#ffd24d", "#ffde7a", "#ffc829", "#191200", "#ffe9b3"),
+        "2":   ("#6eff4d", "#8aff7a", "#49ff1f", "#0c1607", "#caffb3"),
+        "3":   ("#4dbbff", "#79ccff", "#29aaff", "#041218", "#b3e2ff"),
+        "-":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
+        "0":   ("#ff9e4d", "#ffb979", "#ff7f29", "#180e03", "#ffd1b3"),
+        ".":   ("#ff7ab3", "#ff9ac7", "#ff5aa1", "#180a11", "#ffc3df"),
+        "=":   ("#00f0a8", "#2df5bd", "#00d895", "#00130e", "#94fbe0"),
+        "+":   ("#ff4141", "#ff6b6b", "#ff2424", "#140303", "#ff9f9f"),
+    }
+    return palette.get(key, ("#2b2f3a", "#353b49", "#1f2430", "#e8ecf4", "#48516a"))
 
-# platform
-def is_windows() -> bool:
-    return platform.system().lower().startswith("win")
-
-def to_python_ops(expr: str) -> str:
-    return expr.replace("×","*").replace("÷","/")
-
-def sanitize_expression(expr: str) -> str:
-    expr = to_python_ops(expr)
-    for ch in expr:
-        if ch not in "0123456789.+-*/() ":
-            raise ValueError("bad char")
-    return expr
-
-# widgets
 class FunkyButton(tk.Button):
-    def __init__(self, master, text, command):
-        bg, hov, prs, fg, outline = neon_styles(text)
-        fg = ensure_contrast(bg, fg)
+    def __init__(self, master, label: str, cmd, **kw):
+        bg, hov, prs, fg, outline = neon_styles(label)
         super().__init__(
-            master, text=text, command=command, font=FONT_BTN,
-            relief="flat", bd=0, padx=18, pady=18, fg=fg, bg=bg,
-            activeforeground=fg, activebackground=prs, cursor="hand2",
-            highlightthickness=2, highlightbackground=outline, highlightcolor=outline
+            master,
+            text=label,
+            command=cmd,
+            font=FONT_BTN,
+            bg=bg,
+            fg=ensure_contrast(bg, fg),
+            activebackground=prs,
+            activeforeground=ensure_contrast(bg, fg),
+            relief="flat",
+            bd=0,
+            highlightbackground=outline,
+            highlightcolor=outline,
+            padx=14, pady=10,
+            **kw
         )
-        self._bg, self._hov, self._prs, self._outline = bg, hov, prs, outline
-        self.bind("<Enter>", lambda e: self.config(bg=self._hov, highlightbackground=self._outline))
-        self.bind("<Leave>", lambda e: self.config(bg=self._bg,  highlightbackground=self._outline))
-        self.bind("<ButtonPress-1>", lambda e: self.config(bg=self._prs))
-        self.bind("<ButtonRelease-1>", lambda e: self.config(bg=self._hov))
+        self._base_bg = bg
+        self._hov_bg = hov
+        self._prs_bg = prs
+        self._fg = ensure_contrast(bg, fg)
+        self._outline = outline
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
 
-# app
+    def _on_enter(self, _):
+        try: self.config(bg=self._hov_bg)
+        except: pass
+    def _on_leave(self, _):
+        try: self.config(bg=self._base_bg)
+        except: pass
+    def _on_press(self, _):
+        try: self.config(bg=self._prs_bg)
+        except: pass
+    def _on_release(self, _):
+        try: self.config(bg=self._hov_bg)
+        except: pass
+
 class OverengineeredCalculator:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -126,60 +148,55 @@ class OverengineeredCalculator:
         self.enable_random_dots = True
         self.enable_bursts_on_click = True
         self.enable_display_rainbow = True
-        self.enable_button_jiggle = True
-        self.enable_confetti_on_equals = True
         self.enable_glow_pulse = True
-        self.enable_button_glow = True
-        self.enable_operator_flash = True
-        self.enable_title_wave = True
 
-        # shadow
-        self.shadow = tk.Frame(root, bg=PALETTE["shadow"])
-        self.shadow.place(x=PADDING+4, y=PADDING+6, relwidth=1, width=-(PADDING*2), height=920)
-        self.card = tk.Frame(root, bg=PALETTE["card"])
-        self.card.place(x=PADDING, y=PADDING, relwidth=1, width=-(PADDING*2), height=920)
+        # card
+        self.card = tk.Frame(self.root, bg=PALETTE["card"], bd=0, highlightthickness=0)
+        self.card.place(relx=0.5, rely=0.5, anchor="c", width=560, height=920)
 
-        # top
-        top = tk.Frame(self.card, bg=PALETTE["card"])
-        top.pack(fill="x", padx=PADDING, pady=(PADDING, 8))
-        self.title_lbl = tk.Label(top, text="Overengineered Calculator", bg=PALETTE["card"], fg=PALETTE["muted"], font=FONT_TOP)
-        self.title_lbl.pack(side="left")
-        self.clock_lbl = tk.Label(top, text="", bg=PALETTE["card"], fg=PALETTE["muted"], font=FONT_TOP)
-        self.clock_lbl.pack(side="right")
-        self._tick_clock()
+        # title
+        self.title_lbl = tk.Label(
+            self.card, text="Overengineered", bg=PALETTE["card"], fg=PALETTE["muted"], font=("Inter", 16, "bold")
+        )
+        self.title_lbl.place(x=PADDING, y=PADDING)
 
         # display wrapper
-        self.disp_wrap = tk.Frame(self.card, bg=PALETTE["card"], height=104)
-        self.disp_base_x = PADDING
-        self.disp_wrap.place(x=self.disp_base_x, y=PADDING+34, relwidth=1, width=-(PADDING*2), height=104)
+        self.disp_wrap = tk.Frame(self.card, bg=PALETTE["display_bg"])
+        self.disp_wrap.place(x=PADDING, y=64, width=560-2*PADDING, height=120)
+        self.disp_base_x = self.disp_wrap.winfo_x()
 
-        # display
-        self.display_var = tk.StringVar(value="0")
+        # display entry
         self.entry = tk.Entry(
-            self.disp_wrap, textvariable=self.display_var, font=FONT_DISPLAY, justify="right",
-            state="disabled", disabledbackground=PALETTE["display_bg"], disabledforeground=PALETTE["display_fg"],
-            relief="flat", bd=0, insertbackground=PALETTE["display_fg"]
+            self.disp_wrap,
+            bd=0,
+            relief="flat",
+            font=FONT_DISPLAY,
+            bg=PALETTE["display_bg"],
+            fg=PALETTE["display_fg"],
+            insertbackground=PALETTE["display_fg"],
+            disabledforeground=PALETTE["display_fg"],
+            highlightthickness=0,
+            justify="right"
         )
-        self.entry.configure(cursor="arrow")
-        self.entry.bind("<Button-1>", lambda e: "break")
-        self.entry.pack(fill="both", expand=True)
-
-        # divider
-        tk.Frame(self.card, bg=PALETTE["shadow"], height=2).place(x=PADDING, y=PADDING+148, relwidth=1, width=-(PADDING*2))
+        self.entry.place(relx=1.0, rely=0.5, anchor="e", relwidth=1.0, x=-12)
+        self.entry.insert(0, "0")
+        self.entry.config(state="disabled")
 
         # grid
         self.grid_frame = tk.Frame(self.card, bg=PALETTE["card"])
-        self.grid_frame.place(x=PADDING, y=PADDING+162, relwidth=1, width=-(PADDING*2), height=610)
+        self.grid_frame.place(x=PADDING, y=220, width=560-2*PADDING, height=620)
+        for r in range(5):
+            self.grid_frame.grid_rowconfigure(r, weight=1)
+        for c in range(4):
+            self.grid_frame.grid_columnconfigure(c, weight=1)
 
         rows = [
-            [("AC", None), ("←", None), ("(", None), (")", None)],
-            [("7", None),  ("8", None),  ("9", None),  ("÷", None)],
-            [("4", None),  ("5", None),  ("6", None),  ("×", None)],
-            [("1", None),  ("2", None),  ("3", None),  ("-", None)],
-            [("0", None),  (".", None),  ("=", None),  ("+", None)],
+            [("AC", None), ("(", None), (")", None), ("⌫", None)],
+            [("7", None), ("8", None), ("9", None), ("÷", None)],
+            [("4", None), ("5", None), ("6", None), ("×", None)],
+            [("1", None), ("2", None), ("3", None), ("-", None)],
+            [(".", None), ("0", None), ("=", None), ("+", None)],
         ]
-        for r in range(len(rows)): self.grid_frame.rowconfigure(r, weight=1, uniform="row")
-        for c in range(4): self.grid_frame.columnconfigure(c, weight=1, uniform="col")
 
         self.buttons: Dict[str, tk.Button] = {}
         for r, row in enumerate(rows):
@@ -208,121 +225,85 @@ class OverengineeredCalculator:
         self._rainbow_step = 0
         self._display_rainbow_loop()
 
-        # title pulsing
+        # pulse
         self._pulse_tick = 0
         self._pulse_title_glow()
 
-        # button glow loop
-        self._btn_glow_phase = 0
-        self._pulse_buttons_glow()
+        # click confetti
+        if self.enable_bursts_on_click:
+            self.card.bind("<Button-1>", self._click_burst)
 
-        # title wave
-        self._wave_phase = 0
-        self._title_wave_tick()
+        # init entry state
+        self._set_display("0")
 
-        # AC press timestamps
-        self._ac_press_times = []
+    def _start_marquee(self):
+        self.marquee.place(x=self.marquee_x, rely=1.0, y=-8, anchor="sw")
+        self._marquee_step()
 
-    # sounds
-    def _click_sound(self, tone=880, dur=40):
-        if not self.enable_sounds: return
+    def _set_display(self, txt: str):
         try:
-            if is_windows():
-                import winsound
-                winsound.Beep(int(tone), int(dur))
-            else:
-                self.root.bell()
-        except Exception:
+            self.entry.config(state="normal")
+            self.entry.delete(0, "end")
+            self.entry.insert(0, txt)
+            self.entry.config(state="disabled")
+        except:
             pass
 
-    # clock
-    def _tick_clock(self):
-        self.clock_lbl.config(text=time.strftime("%H:%M:%S"))
-        self.root.after(1000, self._tick_clock)
-
-    # display 
-    def _set_display(self, text):
-        s = str(text)
-        self.entry.config(state="normal")
-        self.entry.delete(0, tk.END)
-        self.entry.insert(0, s)
-        self.entry.config(state="disabled")
-        self.display_var.set(s)
-
-    def _get_display(self):
-        return self.display_var.get()
-
-    # logic
-    def press(self, label: str):
-        if label == "AC":
-            self._record_ac_press()
-            self._set_display("0"); return
-        if label == "←":
-            cur = self._get_display()
-            cur = cur[:-1] if cur else "0"
-            if not cur: cur = "0"
-            self._set_display(cur); return
-        if label == "=":
-            self.equals(); return
-        self.insert(label)
-
-    def insert(self, s: str):
-        cur = self._get_display()
-        if cur == "0":
-            if s.isdigit(): cur = s
-            elif s == ".": cur = "0."
-            elif s in ("+", "-", "×", "÷", "("): cur = "0"+s
-            elif s == ")": cur = "0"
-            else: cur = s
-        else:
-            cur += s
-        self._set_display(cur)
-
-    def equals(self):
-        expr = self._get_display()
+    def _get_display(self) -> str:
         try:
-            safe = sanitize_expression(expr)
-            result = eval(safe, {"__builtins__": None}, {})
-            if isinstance(result, float) and result.is_integer(): result = int(result)
-            self._flash_equals()
-            if self.enable_confetti_on_equals: self._confetti_burst_center()
-            self._click_sound(520, 90)
-            self._set_display(result)
-        except Exception:
-            self._click_sound(300, 120)
-            self._set_display("Overengineered Error")
+            self.entry.config(state="normal")
+            v = self.entry.get()
+            self.entry.config(state="disabled")
+            return v
+        except:
+            return "0"
 
-    # button handler
     def _on_button(self, label: str):
-        tone = 640 if label in {"+","-","×","÷"} else 900 if label=="=" else 760 if label.isdigit() else 700
-        self._click_sound(tone, 40 if label != "=" else 70)
-        if self.enable_bursts_on_click: self._spawn_dot_near_button(label)
-        if self.enable_wiggle: self._wiggle_display()
-        if self.enable_button_jiggle: self._jiggle_button(label)
-        if self.enable_operator_flash and label in {"+","-","×","÷"}: self._flash_operator(label)
-        self.press(label)
+        if label == "AC":
+            self._set_display("0")
+            self._jiggle_button(label)
+            self._randomize_button_colors(self.buttons.get(label))
+            return
+        if label == "⌫":
+            cur = self._get_display()
+            cur = cur[:-1] if len(cur) > 1 else "0"
+            self._set_display(cur)
+            self._jiggle_button(label)
+            self._randomize_button_colors(self.buttons.get(label))
+            return
+        if label == "=":
+            self._compute()
+            self._jiggle_button(label)
+            self._randomize_button_colors(self.buttons.get(label))
+            return
 
-    # flash equals
-    def _flash_equals(self):
-        b = self.buttons.get("=")
-        if not b: return
-        orig = b.cget("highlightbackground")
-        b.config(highlightbackground="#9affd7")
-        self.root.after(180, lambda: b.config(highlightbackground=orig))
+        if label in SYMBOLS:
+            ch = SYMBOLS[label]
+        else:
+            ch = label
 
-    # flash operator
-    def _flash_operator(self, label: str):
-        b = self.buttons.get(label)
-        if not b: return
-        orig = b.cget("bg")
-        b.config(bg=jitter_color(orig, 60))
-        self.root.after(120, lambda: self._reset_button_bg(b, orig))
+        cur = self._get_display()
+        if cur == "0" and ch not in (".", "(", ")"):
+            cur = ""
+        cur += ch
+        self._set_display(cur)
+        self._jiggle_button(label)
+        self._randomize_button_colors(self.buttons.get(label))
 
-    def _reset_button_bg(self, btn: tk.Button, color: str):
-        try: btn.config(bg=color)
-        except: pass
+    def _compute(self):
+        cur = self._get_display()
+        try:
+            safe = {"__builtins__": None}
+            safe.update({
+                "abs": abs, "round": round, "min": min, "max": max,
+                "pow": pow, "time": time.time,
+            })
+            cur = cur.replace("×", "*").replace("÷", "/")
+            val = eval(cur, safe, {})
+            self._set_display(str(val))
+        except:
+            self._set_display("Error")
 
-    # wiggle display
     def _wiggle_display(self):
         seq = [0, 6, -6, 4, -4, 2, -2, 0]
         def step(i=0):
@@ -331,14 +312,13 @@ class OverengineeredCalculator:
             self.root.after(18, lambda: step(i+1))
         step()
 
-    # button jiggle
     def _jiggle_button(self, label: str):
         btn = self.buttons.get(label)
         if not btn: return
-        seq = [0,2,-2,1,-1,0]
-        orig_padx = 18; orig_pady = 18
+        seq = [0, 1, 2, 1, 0]
+        orig_padx = int(btn.cget("padx")); orig_pady = int(btn.cget("pady"))
         def s(i=0):
-            if i>=len(seq):
+            if i >= len(seq):
                 try: btn.config(padx=orig_padx, pady=orig_pady)
                 except: pass
                 return
@@ -347,22 +327,21 @@ class OverengineeredCalculator:
             self.root.after(14, lambda: s(i+1))
         s()
 
-    # dots auto
     def _auto_pop(self):
         if self.enable_random_dots: self._spawn_dot()
         self.root.after(random.randint(120, 320), self._auto_pop)
 
-    # spawn dot
     def _spawn_dot(self, at: Optional[Tuple[int,int]] = None):
         self.card.update_idletasks()
-        w, h = self.card.winfo_width(), self.card.winfo_height()
+        w = self.card.winfo_width() or self.card.winfo_reqwidth()
+        h = self.card.winfo_height() or self.card.winfo_reqheight()
         if at is None:
-            x = random.randint(PADDING+8, w-PADDING-8)
-            y = random.randint(PADDING+162, h-40)
+            x = safe_randint(PADDING+8, max(PADDING+8, w-PADDING-8))
+            y = safe_randint(PADDING+162, max(PADDING+162, h-40))
         else:
             x, y = at
         size = random.randint(6, 16)
-        color = random.choice(self.pop_colors)
+        color = safe_choice(self.pop_colors) or "#ffffff"
         dot = tk.Canvas(self.card, width=size, height=size, bg=PALETTE["card"], highlightthickness=0, bd=0)
         dot.place(x=x, y=y)
         oid = dot.create_oval(0, 0, size, size, fill=color, outline="")
@@ -372,36 +351,49 @@ class OverengineeredCalculator:
         if k < 5:
             s = int(max_size * (1 + k*0.25))
             dot.config(width=s, height=s); dot.coords(oid, 0, 0, s, s)
-            self.root.after(30, lambda: self._animate_dot(dot, oid, max_size, k+1))
+            self.root.after(16, lambda: self._animate_dot(dot, oid, max_size, k+1))
         else:
-            def shrink(i=5):
-                if i<=0:
-                    try: dot.destroy()
-                    except: pass
-                    return
-                s2 = int(max_size * (1 + i*0.2))
-                dot.config(width=s2, height=s2); dot.coords(oid, 0, 0, s2, s2)
-                self.root.after(30, lambda: shrink(i-1))
-            shrink()
+            self._fade_and_destroy(dot, oid)
 
-    def _spawn_dot_near_button(self, label: str):
-        btn = self.buttons.get(label)
-        if not btn: return
-        bx = btn.winfo_rootx() - self.card.winfo_rootx()
-        by = btn.winfo_rooty() - self.card.winfo_rooty()
-        bw, bh = btn.winfo_width(), btn.winfo_height()
-        px = bx + random.randint(10, max(12, bw-12))
-        py = by + random.randint(10, max(12, bh-12))
-        for _ in range(random.randint(2,5)):
-            jx = random.randint(-8,8); jy = random.randint(-8,8)
-            self._spawn_dot((px + jx, py + jy))
+    def _fade_and_destroy(self, dot: tk.Canvas, oid: int):
+        def step(i=0):
+            if i>8:
+                try: dot.destroy()
+                except: pass
+                return
+            try: dot.itemconfig(oid, stipple=f"gray{i*12}")
+            except: pass
+            self.root.after(16, lambda: step(i+1))
+        step()
 
-    # marquee
-    def _start_marquee(self):
-        self.card.update_idletasks()
-        self.marquee_x = -self.marquee.winfo_reqwidth()
-        self.marquee.place(x=self.marquee_x, rely=1.0, y=-8, anchor="sw")
-        self._marquee_step()
+    def _click_burst(self, ev):
+        bx, by = ev.x, ev.y
+        btn = None
+        for b in self.buttons.values():
+            try:
+                bx0 = b.winfo_rootx() - self.card.winfo_rootx()
+                by0 = b.winfo_rooty() - self.card.winfo_rooty()
+                bw = b.winfo_width()
+                bh = b.winfo_height()
+                if bx0 <= bx <= bx0+bw and by0 <= by <= by0+bh:
+                    btn = b; break
+            except:
+                pass
+
+        if btn is not None:
+            try:
+                br = btn.winfo_rootx() - self.card.winfo_rootx()
+                by_ = btn.winfo_rooty() - self.card.winfo_rooty()
+                bw = btn.winfo_width(); bh = btn.winfo_height()
+                px = br + random.randint(10, max(12, bw-12))
+                py = by_ + random.randint(10, max(12, bh-12))
+                for _ in range(random.randint(2,5)):
+                    jx = random.randint(-8,8); jy = random.randint(-8,8)
+                    self._confetti_piece((px+jx, py+jy))
+            except:
+                pass
+        else:
+            self._confetti_piece((bx, by))
 
     def _marquee_step(self):
         width = self.card.winfo_width()
@@ -411,7 +403,6 @@ class OverengineeredCalculator:
         self.marquee.place(x=self.marquee_x, rely=1.0, y=-8, anchor="sw")
         self.root.after(18, self._marquee_step)
 
-    # display rainbow loop
     def _display_rainbow_loop(self):
         if self.enable_display_rainbow:
             base = PALETTE["display_fg"]
@@ -422,7 +413,6 @@ class OverengineeredCalculator:
             self._rainbow_step += 1
         self.root.after(50, self._display_rainbow_loop)
 
-    # title glow
     def _pulse_title_glow(self):
         if self.enable_glow_pulse:
             t = (self._pulse_tick % 40)/40.0
@@ -433,53 +423,15 @@ class OverengineeredCalculator:
             self._pulse_tick += 1
         self.root.after(60, self._pulse_title_glow)
 
-    # buttons glow pulse
-    def _pulse_buttons_glow(self):
-        if self.enable_button_glow:
-            phase = (self._btn_glow_phase % 40)/40.0
-            for label, btn in self.buttons.items():
-                bg, hov, prs, fg, outline = neon_styles(label)
-                oc = mix(outline, jitter_color(outline, 40), abs(2*phase-1))
-                try: btn.config(highlightbackground=oc, highlightcolor=oc)
-                except: pass
-            self._btn_glow_phase += 1
-        self.root.after(70, self._pulse_buttons_glow)
-
-    # title wave 
-    def _title_wave_tick(self):
-        if not self.enable_title_wave:
-            self.root.after(120, self._title_wave_tick)
-            return
-        text = "Overengineered Calculator"
-        phase = self._wave_phase
-        styled = []
-        for i,ch in enumerate(text):
-            t = (phase + i) % 10
-            col = mix("#a4b0d3", "#bcd2ff", t/10)
-            styled.append((ch, col))
-        
-        avg_col = mix("#a4b0d3", "#bcd2ff", ((phase%10)/10))
-        try: self.title_lbl.config(fg=avg_col)
-        except: pass
-        self._wave_phase += 1
-        self.root.after(120, self._title_wave_tick)
-
-    # confetti
-    def _confetti_burst_center(self):
-        cx = self.card.winfo_width()//2
-        cy = PADDING+162 + 300
-        for _ in range(14):
-            self._confetti_piece((cx + random.randint(-40,40), cy + random.randint(-30,30)))
-
     def _confetti_piece(self, at: Tuple[int,int]):
-        x,y = at
+        cx, cy = at
         size = random.randint(6,12)
-        color = random.choice(self.pop_colors)
+        color = safe_choice(self.pop_colors) or "#ffffff"
         canvas = tk.Canvas(self.card, width=size*2, height=size*2, bg=PALETTE["card"], highlightthickness=0, bd=0)
-        canvas.place(x=x, y=y)
+        canvas.place(x=cx, y=cy)
         pts = [0,size*2, size,size*0, size*2,size*2]
         poly = canvas.create_polygon(pts, fill=color, outline="")
-        self._animate_confetti(canvas, poly, x, y, size)
+        self._animate_confetti(canvas, poly, cx, cy, size)
 
     def _animate_confetti(self, canvas: tk.Canvas, poly: int, x0: int, y0: int, size: int):
         dx = random.choice([-2,-1,1,2])
@@ -493,44 +445,25 @@ class OverengineeredCalculator:
             x += dx; y += dy
             try: canvas.place_configure(x=x, y=y)
             except: pass
-            self.root.after(24, lambda: step(i+1, x, y))
+            try:
+                t = i/frames
+                s = int(size*(1-t*0.7))
+                canvas.config(width=max(2,s*2), height=max(2,s*2))
+                canvas.coords(poly, 0,s*2, s,0, s*2,s*2)
+            except: pass
+            self.root.after(16, lambda: step(i+1, x, y))
         step()
 
-    # AC easter egg
-    def _record_ac_press(self):
-        t = time.time()
-        self._ac_press_times = [tt for tt in self._ac_press_times if t-tt < 1.2]
-        self._ac_press_times.append(t)
-        if len(self._ac_press_times) >= 5:
-            self._party_mode()
-
-    def _party_mode(self):
-        keys = list(self.buttons.values())
-        def strobe(k=0):
-            if k>=10:
-                for b in keys: self._reset_button_colors(b)
-                return
-            for b in keys: self._randomize_button_colors(b)
-            self.root.after(80, lambda: strobe(k+1))
-        strobe()
-
-    def _reset_button_colors(self, btn: tk.Button):
-        txt = btn.cget("text")
-        bg, hov, prs, fg, outline = neon_styles(txt)
-        fg = ensure_contrast(bg, fg)
-        try:
-            btn.config(bg=bg, fg=fg, activeforeground=fg, activebackground=prs, highlightbackground=outline, highlightcolor=outline)
-        except: pass
-
     def _randomize_button_colors(self, btn: tk.Button):
+        if not btn: return
         txt = btn.cget("text")
         bg, hov, prs, fg, outline = neon_styles(txt)
-        bg2 = jitter_color(bg, 40); hov2 = jitter_color(hov, 40); prs2 = jitter_color(prs, 40); fg2 = ensure_contrast(bg2, jitter_color(fg, 40)); out2 = jitter_color(outline, 40)
+        bg2 = jitter_color(bg, 40); hov2 = jitter_color(hov, 40); prs2 = jitter_color(prs, 40)
+        fg2 = ensure_contrast(bg2, jitter_color(fg, 40)); out2 = jitter_color(outline, 40)
         try:
             btn.config(bg=bg2, fg=fg2, activeforeground=fg2, activebackground=prs2, highlightbackground=out2, highlightcolor=out2)
         except: pass
 
-# run
 def create_overengineered_calculator() -> OverengineeredCalculator:
     root = tk.Tk()
     return OverengineeredCalculator(root)
@@ -541,16 +474,9 @@ def run_overengineered_calculator():
 
 # main
 if __name__ == "__main__":
-    run_overengineered_calculator()
-
-
-import sys, traceback, pathlib
-
-if __name__ == "__main__":
     try:
-        main()   # call your existing entry function
+        run_overengineered_calculator()
     except Exception:
         log = pathlib.Path(sys.executable).with_name("error.log")
         log.write_text(traceback.format_exc(), encoding="utf-8")
         raise
-
