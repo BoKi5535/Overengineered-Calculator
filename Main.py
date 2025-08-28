@@ -542,3 +542,15 @@ def run_overengineered_calculator():
 # main
 if __name__ == "__main__":
     run_overengineered_calculator()
+
+
+import sys, traceback, pathlib
+
+if __name__ == "__main__":
+    try:
+        main()   # call your existing entry function
+    except Exception:
+        log = pathlib.Path(sys.executable).with_name("error.log")
+        log.write_text(traceback.format_exc(), encoding="utf-8")
+        raise
+
