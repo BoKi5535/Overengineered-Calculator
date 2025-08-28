@@ -5,9 +5,13 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write   # needed so the release step can upload
+
 jobs:
   build:
     runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
 
@@ -20,13 +24,29 @@ jobs:
           python -m pip install --upgrade pip wheel pyinstaller
           if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
-      - name: Build EXE
-        run: |
-          pyinstaller --onefile --noconsole --name oCalc Main.py
+      # Debug build first: keep console window so you can see errors
+      - name: Build EXE (with console for debugging)
+        run: >
+          pyinstaller --onefile --name oCalc Main.py
+          # If you have assets/config folders, add e.g.:
+          # --add-data "assets;assets" --add-data "config;config"
+          # If you need hidden imports, add:
+          # --hidden-import somepkg.submodule
 
-      - name: Upload artifact to release
+      - name: Show dist folder
+        run: dir dist
+
+      - name: Upload build artifacts (downloadable from Actions tab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/**
+
+      - name: Upload EXE to release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/oCalc.exe
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
