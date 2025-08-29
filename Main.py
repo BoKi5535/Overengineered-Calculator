@@ -138,7 +138,7 @@ class OverengineeredCalculator:
         self.root = root
         self.root.title("Overengineered Calculator")
         self.root.configure(bg=PALETTE["bg"])
-        self.root.geometry("600x980")
+        self.root.geometry("360x540")
         self.root.resizable(False, False)
         self.root.bind_all("<Key>", lambda e: "break")
 
